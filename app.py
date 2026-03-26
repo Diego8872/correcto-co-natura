@@ -122,8 +122,7 @@ section[data-testid="stFileUploadDropzone"] {
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def norm(s):
-    if s is None:
-        return ""
+    if s is None: return ""
     s = str(s).strip()
     s = unicodedata.normalize('NFD', s)
     s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
@@ -135,7 +134,7 @@ def compare(a, b):
 
 def compare_num(a, b):
     try:
-        return "✅ OK" if abs(float(str(a).replace(',', '.')) - float(str(b).replace(',', '.'))) < 0.05 else "❌ DIFERENCIA"
+        return "✅ OK" if abs(float(str(a).replace(',','.')) - float(str(b).replace(',','.'))) < 0.05 else "❌ DIFERENCIA"
     except:
         return "❌ ERROR"
 
@@ -145,309 +144,187 @@ def parse_num(s):
         s = s.replace('.', '').replace(',', '.')
     else:
         s = s.replace(',', '.')
-    try:
-        return float(s)
-    except:
-        return 0.0
-
-def clean_material_ref(value):
-    if value is None:
-        return None
-
-    s = str(value).strip()
-    if not s:
-        return None
-
-    s = s.replace(' ', '')
-    s = s.replace('\xa0', '')
-
-    # Ej: 50572407.0 -> 50572407
-    if re.fullmatch(r'\d+\.0+', s):
-        s = s.split('.')[0]
-
-    # Si viene como float/decimal raro, rescata primer bloque numérico largo
-    m = re.search(r'(\d{7,8})', s)
-    if m:
-        return int(m.group(1))
-
-    return None
+    try: return float(s)
+    except: return 0.0
 
 def leer_excel(path):
     wb = openpyxl.load_workbook(path, data_only=True)
-
-    # Solapa ITEM
     ws_item = wb['Item']
-
-    # CANTIDAD se busca por encabezado
     headers = [ws_item.cell(1, c).value for c in range(1, 50)]
-    col_cant = next(
-        (i + 1 for i, h in enumerate(headers) if h and 'CANTIDAD' in str(h).upper()),
-        7
-    )
-
-    # Material FIJO: columna I = 9 = MARCA-MODEL-OTRO
-    col_mat = 9
-
+    col_cant = next((i+1 for i,h in enumerate(headers) if h and 'CANTIDAD' in str(h).upper()), 7)
+    col_mat  = next((i+1 for i,h in enumerate(headers) if h and 'MARCA-MODEL' in str(h).upper()), 6)
     items = []
     for row in ws_item.iter_rows(min_row=2, values_only=True):
         if row[0] is not None:
             ncm_raw = str(row[1]) if row[1] else ''
             ncm_clean = ncm_raw[:10]
-
-            mat_raw = row[col_mat - 1] if len(row) >= col_mat else None
-            mat = clean_material_ref(mat_raw)
-
-            items.append({
-                'ITEM': row[0],
-                'NCM': ncm_clean,
-                'CANTIDAD': row[col_cant - 1],
-                'MARCA_MODEL_OTRO': mat
-            })
-
-    # Solapa Carátula
+            mat = row[col_mat-1]
+            if mat and not str(mat).replace('.','').isdigit():
+                mat = row[5]  # fallback columna 6
+            items.append({'ITEM': row[0], 'NCM': ncm_clean, 'CANTIDAD': row[col_cant-1], 'MARCA_MODEL_OTRO': mat})
     ws_car = wb['Carátula']
     rows_car = list(ws_car.iter_rows(values_only=True))
-    empresa = rows_car[1][2] if len(rows_car) > 1 else None
+    empresa  = rows_car[1][2] if len(rows_car) > 1 else None
     facturas = rows_car[4][0] if len(rows_car) > 4 else None
     vendedor = rows_car[4][1] if len(rows_car) > 4 else None
-
-    return {
-        'items': items,
-        'empresa': empresa,
-        'facturas': facturas,
-        'vendedor': vendedor
-    }
+    return {'items': items, 'empresa': empresa, 'facturas': facturas, 'vendedor': vendedor}
 
 def leer_fc(path):
     full = ''
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             t = page.extract_text()
-            if t:
-                full += t + '\n'
-
+            if t: full += t + '\n'
     data = {'fecha': '', 'total_exw': None, 'total_ars': False}
-
     for l in full.split('\n'):
         m = re.search(r'FECHA\s+(\d{2}/\d{2}/\d{4})', l, re.IGNORECASE)
-        if m:
-            data['fecha'] = m.group(1)
-
+        if m: data['fecha'] = m.group(1)
         m = re.search(r'TOTAL\s+EXW\s+([\d\.,]+)', l, re.IGNORECASE)
-        if m:
-            data['total_exw'] = parse_num(m.group(1))
-
-        if re.search(r'TOTAL\s+ARS', l, re.IGNORECASE):
-            data['total_ars'] = True
-
+        if m: data['total_exw'] = parse_num(m.group(1))
+        if re.search(r'TOTAL\s+ARS', l, re.IGNORECASE): data['total_ars'] = True
     return data
 
 def leer_co_pdf(path):
     full_lines = []
-    full_text = ""
-
     with pdfplumber.open(path) as pdf:
         for page in pdf.pages:
             t = page.extract_text()
-            if t:
-                full_text += t + "\n"
-                full_lines.extend(t.split('\n'))
+            if t: full_lines.extend(t.split('\n'))
 
-    # ── productor ────────────────────────────────────────────────────────────
     produtor = ''
-    for l in full_lines[:60]:
+    for l in full_lines[:40]:
         if re.search(r'(industria|comercio|ltda)', l, re.IGNORECASE):
             if not re.search(r'(certificado|origen|validez)', l, re.IGNORECASE):
                 produtor = re.split(r'(RODOVIA|ROD\.|RUA|AV\.|\bSP\b)', l, flags=re.IGNORECASE)[0].strip()
-                if produtor:
-                    break
+                if produtor: break
 
-    # ── importador ───────────────────────────────────────────────────────────
     importador = ''
     for i, l in enumerate(full_lines):
-        if re.search(r'2[,\.]?\s*importador', l, re.IGNORECASE):
-            for j in range(i + 1, min(i + 8, len(full_lines))):
+        if re.search(r'2[,\.]\s*importador', l, re.IGNORECASE):
+            for j in range(i+1, min(i+6, len(full_lines))):
                 c = full_lines[j].strip()
                 if c and any(k in c.upper() for k in ['NATURA', 'S/A', 'LTDA', 'SA']):
                     importador = re.split(r'(CAZADORES|AV\.|RUA|\d{5})', c, flags=re.IGNORECASE)[0].strip()
                     break
             break
 
-    # fallback adicional para importador
-    if not importador:
-        for l in full_lines[:40]:
-            if 'NATURA COSMETICOS S/A' in l.upper():
-                importador = 'NATURA COSMETICOS S/A'
-                break
-
-    # ── factura y fecha ──────────────────────────────────────────────────────
-    factura_num = ''
-    data_co = ''
-
+    factura_num = data_co = ''
     for l in full_lines:
         ln = unicodedata.normalize('NFD', l)
         ln = ''.join(c for c in ln if unicodedata.category(c) != 'Mn')
-
-        m = re.search(r'[Nn]um(?:ero)?[^\d]{0,10}(\d{8,12})', ln)
-        if m and not factura_num:
-            factura_num = m.group(1)
-
+        m = re.search(r'[Nn]um[^\s:]*[:\s]+(\d{8,12})', ln)
+        if m and not factura_num: factura_num = m.group(1)
         m = re.search(r'[Dd]ata[:\s]+(\d{2}/\d{2}/\d{4})', l)
-        if m and not data_co:
-            data_co = m.group(1)
+        if m and not data_co: data_co = m.group(1)
 
-    # ── observaciones campo 12 ───────────────────────────────────────────────
+    pattern = re.compile(
+        r'^\s*(\d{1,2})\s+(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[çc°¢]\s+([\d\.]+,\d{3})'
+    )
+    mat_re = re.compile(r'(?:;\s*)?(\d{7,8})\s*$')
+
+    items = []
+    for i, l in enumerate(full_lines):
+        m = pattern.match(l)
+        if m:
+            orden, ncm, cant_str, val_str = int(m.group(1)), m.group(2), m.group(3), m.group(4)
+            material = None
+            for j in range(i, min(i+50, len(full_lines))):
+                mm = mat_re.search(full_lines[j])
+                if mm: material = int(mm.group(1)); break
+            if not any(it['orden'] == orden for it in items):
+                items.append({'orden': orden, 'ncm': ncm, 'cantidad': cant_str,
+                              'cantidad_num': parse_num(cant_str), 'valor': parse_num(val_str),
+                              'material': material})
+
+    materiales_encontrados = {it['material'] for it in items if it['material']}
+    for i, l in enumerate(full_lines):
+        mm = mat_re.search(l)
+        if mm:
+            mat = int(mm.group(1))
+            if mat not in materiales_encontrados:
+                for back in range(i-1, max(i-60, -1), -1):
+                    m = re.search(r'(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[çc°¢]\s+([\d\.]+,\d{3})', full_lines[back])
+                    if m:
+                        ncm, cant_str = m.group(1), m.group(2)
+                        for it in items:
+                            if it['ncm'] == ncm and it['cantidad'] == cant_str and it['material'] is None:
+                                it['material'] = mat
+                                materiales_encontrados.add(mat)
+                                break
+                        break
+
     obs_lines = []
     capture = False
     for l in full_lines:
-        if re.search(r'12\.\s*observa', l, re.IGNORECASE):
-            capture = True
-            continue
+        if re.search(r'12\.\s*observa', l, re.IGNORECASE): capture = True; continue
         if capture:
-            if re.search(r'(certificac|declarac|13\.|14\.)', l, re.IGNORECASE):
-                break
-            if l.strip():
-                obs_lines.append(l.strip())
+            if re.search(r'(certificac|declarac|13\.|14\.)', l, re.IGNORECASE): break
+            if l.strip(): obs_lines.append(l.strip())
     obs = ' '.join(obs_lines).strip()
 
-    # ── ítems del CO: parser robusto sobre todo el texto ─────────────────────
-    text = full_text.replace('\r', '\n')
-    text = re.sub(r'[ \t]+', ' ', text)
-
-    # Captura por bloques:
-    # orden + NCM + descripción + ; material + cantidad pç valor + DJO
-    block_pattern = re.compile(
-        r'(?ms)'
-        r'^\s*(\d{1,3})\s+'                    # orden
-        r'(\d{4}\.\d{2}\.\d{2})\s+'           # NCM
-        r'(.*?)'                              # descripción libre
-        r';\s*(\d{7,8})\s+'                   # material
-        r'([\d\.]+,\d{3})\s+p[çc°¢]\s+'       # cantidad
-        r'([\d\.]+,\d{3})\s+'                 # valor
-        r'\d{6,8}\s*-\s*\d{2}/\d{2}/\d{4}',   # DJO
-        re.IGNORECASE
-    )
-
-    items = []
-    seen = set()
-
-    for m in block_pattern.finditer(text):
-        orden = int(m.group(1))
-        ncm = m.group(2)
-        material = int(m.group(4))
-        cant_str = m.group(5)
-        val_str = m.group(6)
-
-        key = (orden, material, ncm, cant_str)
-        if key in seen:
-            continue
-        seen.add(key)
-
-        items.append({
-            'orden': orden,
-            'ncm': ncm,
-            'cantidad': cant_str,
-            'cantidad_num': parse_num(cant_str),
-            'valor': parse_num(val_str),
-            'material': material
-        })
-
-    # fallback viejo por líneas si algo no encontró
+    # fallback OCR si no se encontraron items
     if not items:
-        pattern_line = re.compile(
-            r'^\s*(\d{1,3})\s+(\d{4}\.\d{2}\.\d{2}).*?([\d\.]+,\d{3})\s+p[çc°¢]\s+([\d\.]+,\d{3})',
-            re.IGNORECASE
-        )
-        mat_re = re.compile(r';\s*(\d{7,8})\b')
+        try:
+            from pdf2image import convert_from_bytes
+            import pytesseract
+            with open(path, 'rb') as f:
+                pdf_bytes = f.read()
+            pages = convert_from_bytes(pdf_bytes, dpi=250)
+            texts = [pytesseract.image_to_string(p, lang='eng') for p in pages]
+            full_lines = '\n'.join(texts).split('\n')
+            # re-parsear con OCR
+            pattern_ocr = re.compile(r'(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[¢cç°]\s+([\d\.]+,\d{3})', re.IGNORECASE)
+            for i, l in enumerate(full_lines):
+                m = pattern_ocr.search(l)
+                if m:
+                    ncm, cant_str, val_str = m.group(1), m.group(2), m.group(3)
+                    material = None
+                    for j in range(i, min(i+50, len(full_lines))):
+                        mm = mat_re.search(full_lines[j])
+                        if mm: material = int(mm.group(1)); break
+                    items.append({'orden': len(items)+1, 'ncm': ncm, 'cantidad': cant_str,
+                                  'cantidad_num': parse_num(cant_str), 'valor': parse_num(val_str),
+                                  'material': material})
+        except:
+            pass
 
-        for i, l in enumerate(full_lines):
-            m = pattern_line.match(l)
-            if m:
-                orden = int(m.group(1))
-                ncm = m.group(2)
-                cant_str = m.group(3)
-                val_str = m.group(4)
+    return {'produtor': produtor, 'importador': importador, 'factura_num': factura_num,
+            'data': data_co, 'items': items, 'observaciones': obs}
 
-                material = None
-                window = "\n".join(full_lines[i:i+12])
-                mm = mat_re.search(window)
-                if mm:
-                    material = int(mm.group(1))
-
-                if not any(it['orden'] == orden and it['ncm'] == ncm for it in items):
-                    items.append({
-                        'orden': orden,
-                        'ncm': ncm,
-                        'cantidad': cant_str,
-                        'cantidad_num': parse_num(cant_str),
-                        'valor': parse_num(val_str),
-                        'material': material
-                    })
-
-    return {
-        'produtor': produtor,
-        'importador': importador,
-        'factura_num': factura_num,
-        'data': data_co,
-        'items': items,
-        'observaciones': obs
-    }
 
 def generar_reporte(xl, fc_data, co, op_id):
-    hdr_font = Font(name='Arial', bold=True, color='FFFFFF', size=10)
-    hdr_fill = PatternFill('solid', start_color='1F4E79')
-    ok_fill = PatternFill('solid', start_color='C6EFCE')
-    err_fill = PatternFill('solid', start_color='FFC7CE')
-    warn_fill = PatternFill('solid', start_color='FFEB9C')
-    na_fill = PatternFill('solid', start_color='EDEDED')
+    hdr_font   = Font(name='Arial', bold=True, color='FFFFFF', size=10)
+    hdr_fill   = PatternFill('solid', start_color='1F4E79')
+    ok_fill    = PatternFill('solid', start_color='C6EFCE')
+    err_fill   = PatternFill('solid', start_color='FFC7CE')
+    warn_fill  = PatternFill('solid', start_color='FFEB9C')
+    na_fill    = PatternFill('solid', start_color='EDEDED')
     normal_font = Font(name='Arial', size=10)
-    bold_font = Font(name='Arial', bold=True, size=10)
-    thin = Side(style='thin', color='BFBFBF')
+    bold_font   = Font(name='Arial', bold=True, size=10)
+    thin   = Side(style='thin', color='BFBFBF')
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal='center', vertical='center', wrap_text=True)
-    left = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    left   = Alignment(horizontal='left',   vertical='center', wrap_text=True)
 
-    def style_hdr(c):
-        c.font = hdr_font
-        c.fill = hdr_fill
-        c.alignment = center
-        c.border = border
-
-    def style_normal(c):
-        c.font = normal_font
-        c.alignment = left
-        c.border = border
-
+    def style_hdr(c):    c.font=hdr_font; c.fill=hdr_fill; c.alignment=center; c.border=border
+    def style_normal(c): c.font=normal_font; c.alignment=left; c.border=border
     def style_result(c, v):
-        c.font = bold_font
-        c.alignment = center
-        c.border = border
-        if '✅' in v:
-            c.fill = ok_fill
-        elif '❌' in v:
-            c.fill = err_fill
-        elif '⚠️' in v:
-            c.fill = warn_fill
-        else:
-            c.fill = na_fill
-
+        c.font=bold_font; c.alignment=center; c.border=border
+        if '✅' in v:   c.fill=ok_fill
+        elif '❌' in v: c.fill=err_fill
+        elif '⚠️' in v: c.fill=warn_fill
+        else:            c.fill=na_fill
     def style_section(ws, row, text):
         ws.merge_cells(f'A{row}:G{row}')
-        c = ws[f'A{row}']
-        c.value = text
-        c.font = Font(name='Arial', bold=True, size=11, color='FFFFFF')
-        c.fill = PatternFill('solid', start_color='2E75B6')
-        c.alignment = center
-        c.border = border
-        ws.row_dimensions[row].height = 22
-
+        c=ws[f'A{row}']; c.value=text
+        c.font=Font(name='Arial', bold=True, size=11, color='FFFFFF')
+        c.fill=PatternFill('solid', start_color='2E75B6')
+        c.alignment=center; c.border=border; ws.row_dimensions[row].height=22
     def write_row(ws, row, data, result_col):
         for col, val in enumerate(data, start=1):
             c = ws.cell(row=row, column=col, value=val)
-            if col == result_col:
-                style_result(c, str(val))
-            else:
-                style_normal(c)
+            if col == result_col: style_result(c, str(val))
+            else: style_normal(c)
         ws.row_dimensions[row].height = 20
 
     wb = openpyxl.Workbook()
@@ -459,138 +336,80 @@ def generar_reporte(xl, fc_data, co, op_id):
     ws['A1'].fill = PatternFill('solid', start_color='1F3864')
     ws['A1'].alignment = center
     ws.row_dimensions[1].height = 30
-
     for col, w in zip('ABCDEFG', [18, 28, 32, 32, 16, 35, 10]):
         ws.column_dimensions[col].width = w
 
-    co_by_material = {
-        ci['material']: ci
-        for ci in co['items']
-        if ci.get('material') is not None
-    }
+    co_by_material = {ci['material']: ci for ci in co['items'] if ci['material']}
 
     row = 3
-    style_section(ws, row, 'LÓGICA 1 — Excel (Solapa Item) vs PDF CO')
-    row += 1
-
-    for col, h in enumerate(
-        ['ITEM / Material', 'CAMPO', 'VALOR EXCEL', 'VALOR PDF CO', 'RESULTADO', 'CONSIDERACIÓN', ''],
-        start=1
-    ):
+    style_section(ws, row, 'LÓGICA 1 — Excel (Solapa Item) vs PDF CO'); row += 1
+    for col, h in enumerate(['ITEM / Material','CAMPO','VALOR EXCEL','VALOR PDF CO','RESULTADO','CONSIDERACIÓN',''], start=1):
         style_hdr(ws.cell(row=row, column=col, value=h))
     row += 1
-
     for item in xl['items']:
-        ref = clean_material_ref(item['MARCA_MODEL_OTRO'])
-        co_item = co_by_material.get(ref) if ref is not None else None
-
+        ref = item['MARCA_MODEL_OTRO']
+        co_item = co_by_material.get(int(ref)) if ref and str(ref).replace('.','').isdigit() else None
         ncm_display = str(item['NCM'])[:10] if item['NCM'] else ''
-        ncm_10 = ncm_display.replace('.', '')
-
+        ncm_10 = ncm_display.replace('.','')
         if co_item:
-            res_ncm = "✅ OK" if ncm_10 == co_item['ncm'].replace('.', '') else "❌ DIFERENCIA"
-
-            try:
-                cant_exc = float(str(item['CANTIDAD']).replace(',', '.'))
-            except:
-                cant_exc = 0.0
-
+            res_ncm  = "✅ OK" if ncm_10 == co_item['ncm'].replace('.','') else "❌ DIFERENCIA"
+            cant_exc = float(str(item['CANTIDAD']).replace(',','.'))
             res_cant = "✅ OK" if abs(cant_exc - co_item['cantidad_num']) < 0.01 else "❌ DIFERENCIA"
-
             rows_data = [
                 (f"{item['ITEM']} / {ref}", 'NCM', ncm_display, co_item['ncm'], res_ncm, '10 primeros caracteres'),
-                ('', 'CANTIDAD', str(int(cant_exc)) if cant_exc.is_integer() else str(cant_exc), co_item['cantidad'], res_cant, 'Decimales: coma en CO'),
+                ('', 'CANTIDAD', str(int(cant_exc)), co_item['cantidad'], res_cant, 'Decimales: coma en CO'),
             ]
         else:
             rows_data = [
                 (f"{item['ITEM']} / {ref}", 'NCM', ncm_display, '⚠️ No encontrado en CO', '⚠️ SIN MATCH', 'Material no hallado'),
                 ('', 'CANTIDAD', str(item['CANTIDAD']), '⚠️ No encontrado en CO', '⚠️ SIN MATCH', ''),
             ]
-
-        for d in rows_data:
-            write_row(ws, row, d, 5)
-            row += 1
+        for d in rows_data: write_row(ws, row, d, 5); row += 1
 
     row += 1
-    style_section(ws, row, 'LÓGICA 2 — Excel (Solapa Carátula) vs PDF CO')
-    row += 1
-
-    for col, h in enumerate(
-        ['CAMPO EXCEL', 'VALOR EXCEL', 'CAMPO PDF CO', 'VALOR PDF CO', 'RESULTADO', 'CONSIDERACIÓN', ''],
-        start=1
-    ):
+    style_section(ws, row, 'LÓGICA 2 — Excel (Solapa Carátula) vs PDF CO'); row += 1
+    for col, h in enumerate(['CAMPO EXCEL','VALOR EXCEL','CAMPO PDF CO','VALOR PDF CO','RESULTADO','CONSIDERACIÓN',''], start=1):
         style_hdr(ws.cell(row=row, column=col, value=h))
     row += 1
-
     l2 = [
         ('FACTURAS', str(xl['facturas']), 'FACTURA COMERCIAL (Nro)', co['factura_num'], compare(str(xl['facturas']), co['factura_num']), 'Número de factura'),
-        ('EMPRESA', str(xl['empresa']), '2. IMPORTADOR (razón social)', co['importador'], compare(str(xl['empresa']), co['importador']), 'Solo razón social'),
+        ('EMPRESA',  str(xl['empresa']),  '2. IMPORTADOR (razón social)', co['importador'], compare(str(xl['empresa']), co['importador']), 'Solo razón social'),
     ]
-
     if xl['vendedor']:
-        l2.append(
-            ('VENDEDOR', str(xl['vendedor']), '1. PRODUTOR FINAL OU EXPORTADOR', co['produtor'], compare(str(xl['vendedor']), co['produtor']), 'Solo razón social')
-        )
+        l2.append(('VENDEDOR', str(xl['vendedor']), '1. PRODUTOR FINAL OU EXPORTADOR', co['produtor'], compare(str(xl['vendedor']), co['produtor']), 'Solo razón social'))
     else:
-        l2.append(
-            ('VENDEDOR', 'NO INFORMADO EN EXCEL', '1. PRODUTOR FINAL OU EXPORTADOR', co['produtor'], '⚠️ NO APLICA', 'Campo ausente en este Excel')
-        )
-
-    for d in l2:
-        write_row(ws, row, d, 5)
-        ws.row_dimensions[row].height = 22
-        row += 1
+        l2.append(('VENDEDOR', 'NO INFORMADO EN EXCEL', '1. PRODUTOR FINAL OU EXPORTADOR', co['produtor'], '⚠️ NO APLICA', 'Campo ausente en este Excel'))
+    for d in l2: write_row(ws, row, d, 5); ws.row_dimensions[row].height=22; row += 1
 
     row += 1
-    style_section(ws, row, 'LÓGICA 3 — PDF CO vs PDF FC')
-    row += 1
-
-    for col, h in enumerate(
-        ['CAMPO PDF CO', 'VALOR PDF CO', 'CAMPO PDF FC', 'VALOR PDF FC', 'RESULTADO', 'CONSIDERACIÓN', ''],
-        start=1
-    ):
+    style_section(ws, row, 'LÓGICA 3 — PDF CO vs PDF FC'); row += 1
+    for col, h in enumerate(['CAMPO PDF CO','VALOR PDF CO','CAMPO PDF FC','VALOR PDF FC','RESULTADO','CONSIDERACIÓN',''], start=1):
         style_hdr(ws.cell(row=row, column=col, value=h))
     row += 1
-
     suma_co = sum(ci['valor'] for ci in co['items'])
     res_total = compare_num(suma_co, fc_data['total_exw']) if fc_data['total_exw'] else '⚠️ NO ENCONTRADO'
-
     l3 = [
         ('DATA', co['data'], 'FECHA', fc_data['fecha'], compare(co['data'], fc_data['fecha']), 'Sin consideraciones'),
         ('SUMA TOTAL "9. VALOR"', f"{suma_co:,.3f}", 'TOTAL EXW', f"{fc_data['total_exw']:,.2f}" if fc_data['total_exw'] else 'N/A', res_total, 'Suma todos los valores punto 9'),
     ]
-
-    for d in l3:
-        write_row(ws, row, d, 5)
-        ws.row_dimensions[row].height = 22
-        row += 1
+    for d in l3: write_row(ws, row, d, 5); ws.row_dimensions[row].height=22; row += 1
 
     row += 1
-    style_section(ws, row, 'LÓGICA 4 — PDF FC vs PDF CO (Campo 12. Observações)')
-    row += 1
-
-    for col, h in enumerate(
-        ['CONDICIÓN (PDF FC)', 'ESTADO', 'LEYENDA ESPERADA EN CO-12', 'VALOR ENCONTRADO EN CO-12', 'RESULTADO', 'CONSIDERACIÓN', ''],
-        start=1
-    ):
+    style_section(ws, row, 'LÓGICA 4 — PDF FC vs PDF CO (Campo 12. Observações)'); row += 1
+    for col, h in enumerate(['CONDICIÓN (PDF FC)','ESTADO','LEYENDA ESPERADA EN CO-12','VALOR ENCONTRADO EN CO-12','RESULTADO','CONSIDERACIÓN',''], start=1):
         style_hdr(ws.cell(row=row, column=col, value=h))
     row += 1
-
     obs = co['observaciones']
     c12 = obs[:100] if obs else '⚠️ Campo 12 no encontrado en PDF'
     nota = 'Campo 12 leído correctamente' if obs else '⚠️ Subir CO con texto seleccionable'
     res_ars = ('✅ OK' if 'PESOS' in norm(obs) or 'REAIS' in norm(obs) else '❌ DIFERENCIA') if obs else '⚠️ NO VERIFICABLE'
     res_exw = ('✅ OK' if 'EXW' in norm(obs) else '❌ DIFERENCIA') if obs else '⚠️ NO VERIFICABLE'
-
     if fc_data['total_ars']:
         write_row(ws, row, ['FC tiene TOTAL ARS', 'Sí - por ítem', 'AO VALOR EM MOEDA LOCAL (PESOS OU REAIS)', c12, res_ars, nota], 5)
-        ws.row_dimensions[row].height = 30
-        row += 1
-
+        ws.row_dimensions[row].height=30; row += 1
     if fc_data['total_exw']:
         write_row(ws, row, ['FC tiene TOTAL EXW', f"{fc_data['total_exw']:,.2f}", 'AO VALOR EXW DA FATURA COMERCIAL', c12, res_exw, nota], 5)
-        ws.row_dimensions[row].height = 30
-        row += 1
+        ws.row_dimensions[row].height=30; row += 1
 
     row += 2
     ws.merge_cells(f'A{row}:G{row}')
@@ -614,7 +433,7 @@ col1, col2, col3 = st.columns(3)
 
 with col1:
     st.markdown('<div class="upload-label">📊 Excel</div>', unsafe_allow_html=True)
-    excel_file = st.file_uploader("Excel", type=["xlsx", "xls"], label_visibility="collapsed", key="excel")
+    excel_file = st.file_uploader("Excel", type=["xlsx","xls"], label_visibility="collapsed", key="excel")
     if excel_file:
         st.markdown(f'<div class="file-ok">✓ {excel_file.name}</div>', unsafe_allow_html=True)
 
@@ -638,19 +457,14 @@ if todos_ok:
     if st.button("⚡ Generar Reporte"):
         with st.spinner("Procesando documentos..."):
             try:
+                # guardar temporalmente
                 import tempfile
-
                 with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as f:
-                    f.write(excel_file.read())
-                    excel_path = f.name
-
+                    f.write(excel_file.read()); excel_path = f.name
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
-                    f.write(co_file.read())
-                    co_path = f.name
-
+                    f.write(co_file.read()); co_path = f.name
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
-                    f.write(fc_file.read())
-                    fc_path = f.name
+                    f.write(fc_file.read()); fc_path = f.name
 
                 st.markdown('<div class="status-bar">📊 Leyendo Excel...</div>', unsafe_allow_html=True)
                 xl = leer_excel(excel_path)
@@ -666,11 +480,10 @@ if todos_ok:
 
                 buf = generar_reporte(xl, fc_data, co, op_id)
 
+                # limpiar temp
                 for p in [excel_path, co_path, fc_path]:
-                    try:
-                        os.unlink(p)
-                    except:
-                        pass
+                    try: os.unlink(p)
+                    except: pass
 
                 st.success(f"✅ Reporte generado — {len(co['items'])} ítems procesados")
                 st.download_button(
@@ -679,21 +492,13 @@ if todos_ok:
                     file_name=f"Reporte_Cruces_{op_id}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-
             except Exception as e:
                 st.error(f"Error: {e}")
 else:
     st.button("⚡ Generar Reporte", disabled=True)
     if not todos_ok:
         faltantes = []
-        if not excel_file:
-            faltantes.append("Excel")
-        if not co_file:
-            faltantes.append("CO")
-        if not fc_file:
-            faltantes.append("FC")
-
-        st.markdown(
-            f'<div class="status-bar">⏳ Faltan: {", ".join(faltantes)}</div>',
-            unsafe_allow_html=True
-        )
+        if not excel_file: faltantes.append("Excel")
+        if not co_file: faltantes.append("CO")
+        if not fc_file: faltantes.append("FC")
+        st.markdown(f'<div class="status-bar">⏳ Faltan: {", ".join(faltantes)}</div>', unsafe_allow_html=True)

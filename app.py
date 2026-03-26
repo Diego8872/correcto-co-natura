@@ -220,17 +220,28 @@ def leer_co_pdf(path):
     pattern = re.compile(
         r'^\s*(\d{1,2})\s+(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[çc°¢]\s+([\d\.]+,\d{3})'
     )
-    mat_re = re.compile(r'(?:;\s*)?(\d{7,8})\s*$')
+
+    # FIX: dos modos de capturar el material:
+    # 1) inline: "; 50XXXXXX" con o sin texto después (ej: fecha en misma línea)
+    # 2) línea sola: la línea anterior contiene ";" y esta línea es solo el número
+    mat_re_inline   = re.compile(r';\s*(\d{7,8})(?:\s|$)')
+    mat_re_nextline = re.compile(r'^\s*(\d{7,8})\s*$')
+
+    def buscar_material(lines, start, window=50):
+        for j in range(start, min(start+window, len(lines))):
+            mm = mat_re_inline.search(lines[j])
+            if mm: return int(mm.group(1))
+            if j > start and ';' in lines[j-1]:
+                mm2 = mat_re_nextline.match(lines[j])
+                if mm2: return int(mm2.group(1))
+        return None
 
     items = []
     for i, l in enumerate(full_lines):
         m = pattern.match(l)
         if m:
             orden, ncm, cant_str, val_str = int(m.group(1)), m.group(2), m.group(3), m.group(4)
-            material = None
-            for j in range(i, min(i+50, len(full_lines))):
-                mm = mat_re.search(full_lines[j])
-                if mm: material = int(mm.group(1)); break
+            material = buscar_material(full_lines, i)
             if not any(it['orden'] == orden for it in items):
                 items.append({'orden': orden, 'ncm': ncm, 'cantidad': cant_str,
                               'cantidad_num': parse_num(cant_str), 'valor': parse_num(val_str),
@@ -238,7 +249,9 @@ def leer_co_pdf(path):
 
     materiales_encontrados = {it['material'] for it in items if it['material']}
     for i, l in enumerate(full_lines):
-        mm = mat_re.search(l)
+        mm = mat_re_inline.search(l)
+        if not mm and i > 0 and ';' in full_lines[i-1]:
+            mm = mat_re_nextline.match(l)
         if mm:
             mat = int(mm.group(1))
             if mat not in materiales_encontrados:
@@ -272,7 +285,6 @@ def leer_co_pdf(path):
             pages = convert_from_bytes(pdf_bytes, dpi=250)
             texts = [pytesseract.image_to_string(p, lang='eng') for p in pages]
             full_lines = '\n'.join(texts).split('\n')
-            # re-parsear con OCR
             pattern_ocr = re.compile(r'(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[¢cç°]\s+([\d\.]+,\d{3})', re.IGNORECASE)
             for i, l in enumerate(full_lines):
                 m = pattern_ocr.search(l)
@@ -457,7 +469,6 @@ if todos_ok:
     if st.button("⚡ Generar Reporte"):
         with st.spinner("Procesando documentos..."):
             try:
-                # guardar temporalmente
                 import tempfile
                 with tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False) as f:
                     f.write(excel_file.read()); excel_path = f.name
@@ -480,7 +491,6 @@ if todos_ok:
 
                 buf = generar_reporte(xl, fc_data, co, op_id)
 
-                # limpiar temp
                 for p in [excel_path, co_path, fc_path]:
                     try: os.unlink(p)
                     except: pass

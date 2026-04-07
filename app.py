@@ -217,13 +217,11 @@ def leer_co_pdf(path):
         m = re.search(r'[Dd]ata[:\s]+(\d{2}/\d{2}/\d{4})', l)
         if m and not data_co: data_co = m.group(1)
 
+    # FIX: acepta gr, kg, pc y variantes anteriores (p con caracteres especiales)
     pattern = re.compile(
-        r'^\s*(\d{1,2})\s+(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[çc°¢]\s+([\d\.]+,\d{3})'
+        r'^\s*(\d{1,2})\s+(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+(?:gr|kg|pc|p[çc°¢])\s+([\d\.]+,\d{3})'
     )
 
-    # FIX: dos modos de capturar el material:
-    # 1) inline: "; 50XXXXXX" con o sin texto después (ej: fecha en misma línea)
-    # 2) línea sola: la línea anterior contiene ";" y esta línea es solo el número
     mat_re_inline   = re.compile(r';\s*(\d{7,8})(?:\s|$)')
     mat_re_nextline = re.compile(r'^\s*(\d{7,8})\s*$')
 
@@ -256,7 +254,7 @@ def leer_co_pdf(path):
             mat = int(mm.group(1))
             if mat not in materiales_encontrados:
                 for back in range(i-1, max(i-60, -1), -1):
-                    m = re.search(r'(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[çc°¢]\s+([\d\.]+,\d{3})', full_lines[back])
+                    m = re.search(r'(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+(?:gr|kg|pc|p[çc°¢])\s+([\d\.]+,\d{3})', full_lines[back])
                     if m:
                         ncm, cant_str = m.group(1), m.group(2)
                         for it in items:
@@ -285,14 +283,14 @@ def leer_co_pdf(path):
             pages = convert_from_bytes(pdf_bytes, dpi=250)
             texts = [pytesseract.image_to_string(p, lang='eng') for p in pages]
             full_lines = '\n'.join(texts).split('\n')
-            pattern_ocr = re.compile(r'(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+p[¢cç°]\s+([\d\.]+,\d{3})', re.IGNORECASE)
+            pattern_ocr = re.compile(r'(\d{4}\.\d{2}\.\d{2})[^\n]*?([\d\.]+,\d{3})\s+(?:gr|kg|pc|p[¢cç°])\s+([\d\.]+,\d{3})', re.IGNORECASE)
             for i, l in enumerate(full_lines):
                 m = pattern_ocr.search(l)
                 if m:
                     ncm, cant_str, val_str = m.group(1), m.group(2), m.group(3)
                     material = None
                     for j in range(i, min(i+50, len(full_lines))):
-                        mm = mat_re.search(full_lines[j])
+                        mm = mat_re_inline.search(full_lines[j])
                         if mm: material = int(mm.group(1)); break
                     items.append({'orden': len(items)+1, 'ncm': ncm, 'cantidad': cant_str,
                                   'cantidad_num': parse_num(cant_str), 'valor': parse_num(val_str),

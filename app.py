@@ -212,7 +212,7 @@ def leer_co_pdf(path):
     for l in full_lines:
         ln = unicodedata.normalize('NFD', l)
         ln = ''.join(c for c in ln if unicodedata.category(c) != 'Mn')
-        m = re.search(r'[Nn]um[^\s:]*[:\s]+(\d{8,12})', ln)
+        m = re.search(r'[Nn]um[^\s:]*[:\s]+([A-Z]{0,5}\d{6,12})', ln)
         if m and not factura_num: factura_num = m.group(1)
         m = re.search(r'[Dd]ata[:\s]+(\d{2}/\d{2}/\d{4})', l)
         if m and not data_co: data_co = m.group(1)

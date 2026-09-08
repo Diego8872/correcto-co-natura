@@ -1,6 +1,6 @@
 streamlit==1.50.0
 openpyxl
 pdfplumber
-pdf2image
+pymupdf
 pillow
 groq
